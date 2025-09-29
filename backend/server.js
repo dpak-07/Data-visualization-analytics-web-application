@@ -12,3 +12,9 @@ app.use(bodyParser.json());
 app.use('/api', allRoutes); // /api/auth, /api/mous etc.
 
 app.listen(3000, () => console.log('Server running on port 3000'));
+
+// ... other route imports
+const uploadRoutes = require('./routes/upload_routes');
+
+// ... other app.use() calls for routes
+app.use('/api', uploadRoutes); // This will make your endpoint available at POST /api/upload
