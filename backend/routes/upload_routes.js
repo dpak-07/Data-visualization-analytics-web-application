@@ -1,6 +1,9 @@
-// routes/upload_routes.js (CommonJS)
+// routes/upload_routes.js
 const express = require("express");
+// If your folder is misspelled as 'middleweres', use that; otherwise use 'middlewares'
 const { uploadDisk } = require("../middleweres/uploadMiddleware.js");
+// const { uploadDisk } = require("../middlewares/uploadMiddleware.js");
+
 const {
   uploadAndRegister,
   buildChartData,
@@ -9,7 +12,7 @@ const {
   downloadFile,
 } = require("../controllers/uploadController.js");
 
-// const { verifyToken, requireRole } = require("../middlewares/authMiddleware.js");
+// const { verifyToken } = require("../middlewares/authMiddleware.js");
 
 const router = express.Router();
 
