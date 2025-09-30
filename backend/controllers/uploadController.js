@@ -1,7 +1,8 @@
-import fs from "fs";
-import xlsx from "xlsx";
-import { v4 as uuid } from "uuid";
-import Dataset from "../models/Dataset.js";
+// controllers/uploadController.js
+const fs = require("fs");
+const xlsx = require("xlsx");
+const { v4: uuid } = require("uuid");
+const { getDb } = require("../config/db");
 
 // ---- helpers ----
 const CACHE = new Map(); // key: filePath -> { mtimeMs, wb }
@@ -79,7 +80,7 @@ function aggregate(values, agg) {
 // ---- controllers ----
 
 // Upload file (saved by multer to disk) + register metadata in Mongo
-export const uploadAndRegister = async (req, res) => {
+async function uploadAndRegister(req, res) {
   try {
     if (!req.file?.path) return res.status(400).json({ error: "No file uploaded" });
     const userId = req.user?.id || req.headers["x-user-id"] || "anonymous";
@@ -106,7 +107,9 @@ export const uploadAndRegister = async (req, res) => {
       if (preview.length < 10) preview.push(...nrows.slice(0, Math.max(0, 10 - preview.length)));
     }
 
-    await Dataset.create({
+    // Insert metadata into Mongo (native driver)
+    const db = getDb();
+    const doc = {
       datasetId,
       userId,
       originalFilename,
@@ -114,23 +117,28 @@ export const uploadAndRegister = async (req, res) => {
       sheets,
       columnsBySheet,
       preview,
-    });
+      createdAt: new Date(),
+    };
 
-    res.json({ datasetId, sheets, columns: columnsBySheet, preview, file: { filePath, originalFilename } });
+    await db.collection("datasets").insertOne(doc);
+
+    return res.json({ datasetId, sheets, columns: columnsBySheet, preview, file: { filePath, originalFilename } });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "upload/register failed" });
+    console.error("upload/register failed:", e);
+    return res.status(500).json({ error: "upload/register failed" });
   }
-};
+}
 
 // Build chart-ready data by reading from disk every time (cached workbook)
-export const buildChartData = async (req, res) => {
+async function buildChartData(req, res) {
   try {
     const { datasetId, sheet, xKey, yKeys, agg = "sum", groupBy = true, filters } = req.body;
     if (!datasetId || !sheet || !xKey || !yKeys?.length) {
       return res.status(400).json({ error: "datasetId, sheet, xKey, yKeys required" });
     }
-    const d = await Dataset.findOne({ datasetId }).lean();
+
+    const db = getDb();
+    const d = await db.collection("datasets").findOne({ datasetId });
     if (!d) return res.status(404).json({ error: "dataset not found" });
 
     const wb = loadWorkbook(d.filePath);
@@ -168,44 +176,66 @@ export const buildChartData = async (req, res) => {
 
     return res.json({ series, xType });
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "chart-data failed" });
+    console.error("chart-data failed:", e);
+    return res.status(500).json({ error: "chart-data failed" });
   }
-};
+}
 
 // User history
-export const history = async (req, res) => {
+async function history(req, res) {
   try {
     const userId = req.user?.id || req.headers["x-user-id"] || "anonymous";
-    const items = await Dataset.find({ userId }).sort({ createdAt: -1 }).lean();
-    res.json(items.map(d => ({
+    const db = getDb();
+    const items = await db.collection("datasets").find({ userId }).sort({ createdAt: -1 }).toArray();
+    return res.json(items.map(d => ({
       datasetId: d.datasetId,
       filename: d.originalFilename,
       createdAt: d.createdAt,
       sheets: d.sheets,
     })));
-  } catch {
-    res.status(500).json({ error: "history failed" });
+  } catch (e) {
+    console.error("history failed:", e);
+    return res.status(500).json({ error: "history failed" });
   }
-};
+}
 
 // Dataset meta for re-opening
-export const meta = async (req, res) => {
-  const d = await Dataset.findOne({ datasetId: req.params.id }).lean();
-  if (!d) return res.status(404).json({ error: "not found" });
-  res.json({
-    datasetId: d.datasetId,
-    sheets: d.sheets,
-    columns: d.columnsBySheet,
-    preview: d.preview,
-    filename: d.originalFilename,
-    createdAt: d.createdAt,
-  });
-};
+async function meta(req, res) {
+  try {
+    const db = getDb();
+    const d = await db.collection("datasets").findOne({ datasetId: req.params.id });
+    if (!d) return res.status(404).json({ error: "not found" });
+    return res.json({
+      datasetId: d.datasetId,
+      sheets: d.sheets,
+      columns: d.columnsBySheet,
+      preview: d.preview,
+      filename: d.originalFilename,
+      createdAt: d.createdAt,
+    });
+  } catch (e) {
+    console.error("meta failed:", e);
+    return res.status(500).json({ error: "meta failed" });
+  }
+}
 
 // Download original file
-export const downloadFile = async (req, res) => {
-  const d = await Dataset.findOne({ datasetId: req.params.id }).lean();
-  if (!d) return res.status(404).json({ error: "not found" });
-  res.download(d.filePath, d.originalFilename);
+async function downloadFile(req, res) {
+  try {
+    const db = getDb();
+    const d = await db.collection("datasets").findOne({ datasetId: req.params.id });
+    if (!d) return res.status(404).json({ error: "not found" });
+    return res.download(d.filePath, d.originalFilename);
+  } catch (e) {
+    console.error("download failed:", e);
+    return res.status(500).json({ error: "download failed" });
+  }
+}
+
+module.exports = {
+  uploadAndRegister,
+  buildChartData,
+  history,
+  meta,
+  downloadFile,
 };
