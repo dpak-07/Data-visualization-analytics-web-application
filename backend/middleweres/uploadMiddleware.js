@@ -1,55 +1,31 @@
-// middleweres/uploadMiddleware.js
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const UPLOADS_FOLDER = 'uploads';
-
-// This line ensures the root 'uploads' directory exists.
-if (!fs.existsSync(UPLOADS_FOLDER)) {
-    fs.mkdirSync(UPLOADS_FOLDER);
-}
-
+// Helper to build per-user folder (expects req.user.id from auth)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // This assumes your authMiddleware adds a 'user' object with an 'id' to the request.
-    // This is the secure way to identify the user.
-    const userId = req.user.id; 
-    if (!userId) {
-        return cb(new Error('Authentication error: User ID not found.'), false);
-    }
-
-    const userFolderPath = path.join(UPLOADS_FOLDER, `user_${userId}`);
-    // Create the user-specific directory if it doesn't exist.
-    fs.mkdirSync(userFolderPath, { recursive: true }); 
-    cb(null, userFolderPath);
+    const userId = req.user?.id || req.headers["x-user-id"] || "anonymous";
+    const dest = path.join(__dirname, "..", "uploads", "users", userId);
+    fs.mkdir(dest, { recursive: true }, (err) => cb(err, dest));
   },
   filename: (req, file, cb) => {
-    // Create a unique filename to avoid naming conflicts.
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const fileExtension = path.extname(file.originalname);
-    cb(null, path.basename(file.originalname, fileExtension) + '-' + uniqueSuffix + fileExtension);
-  }
+    const safe = file.originalname.replace(/[^\w.\-]/g, "_");
+    cb(null, `${Date.now()}-${safe}`);
+  },
 });
 
-// File filter to ensure only excel files are uploaded
 const fileFilter = (req, file, cb) => {
-    const allowedMimeTypes = [
-        'application/vnd.ms-excel', // .xls
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // .xlsx
-    ];
-    if (allowedMimeTypes.includes(file.mimetype)) {
-        cb(null, true);
-    } else {
-        cb(new Error('Invalid file type. Only Excel files (.xls, .xlsx) are allowed.'), false);
-    }
+  const ok = /\.(xlsx|xls|csv)$/i.test(file.originalname);
+  cb(ok ? null : new Error("Only .xlsx, .xls, .csv files are allowed"), ok);
 };
 
-const upload = multer({ 
-    storage: storage,
-    fileFilter: fileFilter,
-    limits: { fileSize: 10 * 1024 * 1024 }, // Limit file size to 10MB
+export const uploadDisk = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
-
-module.exports = upload;

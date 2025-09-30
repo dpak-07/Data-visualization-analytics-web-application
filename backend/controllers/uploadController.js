@@ -1,42 +1,211 @@
-// controllers/uploadController.js
+import fs from "fs";
+import xlsx from "xlsx";
+import { v4 as uuid } from "uuid";
+import Dataset from "../models/Dataset.js";
 
-const xlsx = require('xlsx');
-// const File = require('../models/fileModel'); // Uncomment this if you create the optional File model
+// ---- helpers ----
+const CACHE = new Map(); // key: filePath -> { mtimeMs, wb }
 
-const processExcelFile = async (req, res) => {
+function loadWorkbook(filePath) {
+  const stat = fs.statSync(filePath);
+  const cached = CACHE.get(filePath);
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.wb;
+  const buf = fs.readFileSync(filePath);
+  const wb = xlsx.read(buf, { type: "buffer", cellDates: true });
+  CACHE.set(filePath, { mtimeMs: stat.mtimeMs, wb });
+  return wb;
+}
+
+function normalizeValue(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return v;
+  const n = Number(v);
+  if (!Number.isNaN(n) && v !== "" && typeof v !== "boolean") return n;
+  const d = new Date(v);
+  if (!isNaN(d.getTime()) && /[-/T]/.test(String(v))) return d;
+  return String(v);
+}
+
+function getNormalizedRows(wb, sheetName) {
+  const ws = wb.Sheets[sheetName];
+  if (!ws) return [];
+  const rows = xlsx.utils.sheet_to_json(ws, { defval: null, raw: true });
+  return rows.map(r => {
+    const o = {};
+    for (const k of Object.keys(r)) o[k] = normalizeValue(r[k]);
+    return o;
+  });
+}
+
+function passFilters(r, filters) {
+  if (!filters) return true;
+  for (const [k, rule] of Object.entries(filters)) {
+    const v = r[k];
+    if (rule?.eq != null && v !== rule.eq) return false;
+    if (rule?.in && Array.isArray(rule.in) && !rule.in.includes(v)) return false;
+    if (rule?.range && Array.isArray(rule.range)) {
+      const [min, max] = rule.range;
+      if (typeof v === "number") {
+        if (min != null && v < min) return false;
+        if (max != null && v > max) return false;
+      } else if (v instanceof Date) {
+        if (min != null && v < new Date(min)) return false;
+        if (max != null && v > new Date(max)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function groupByKey(rows, key) {
+  const map = new Map();
+  for (const r of rows) {
+    const k = r[key] ?? null;
+    const kk = k instanceof Date ? k.getTime() : k;
+    if (!map.has(kk)) map.set(kk, { raw: k, rows: [] });
+    map.get(kk).rows.push(r);
+  }
+  return [...map.values()];
+}
+
+function aggregate(values, agg) {
+  const nums = values.filter(v => typeof v === "number");
+  if (agg === "count") return values.filter(v => v !== null && v !== "").length;
+  if (agg === "avg") return nums.length ? nums.reduce((a,b)=>a+b,0)/nums.length : 0;
+  if (agg === "sum") return nums.reduce((a,b)=>a+b,0);
+  return values[0] ?? null; // none
+}
+
+// ---- controllers ----
+
+// Upload file (saved by multer to disk) + register metadata in Mongo
+export const uploadAndRegister = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'File was not uploaded.' });
+    if (!req.file?.path) return res.status(400).json({ error: "No file uploaded" });
+    const userId = req.user?.id || req.headers["x-user-id"] || "anonymous";
+    const filePath = req.file.path;
+    const originalFilename = req.file.originalname;
+    const datasetId = uuid();
+
+    const wb = loadWorkbook(filePath);
+
+    const sheets = [];
+    const columnsBySheet = {};
+    const preview = [];
+
+    for (const sheetName of wb.SheetNames) {
+      const nrows = getNormalizedRows(wb, sheetName);
+      const columns = Array.from(
+        nrows.reduce((set, r) => {
+          Object.keys(r).forEach(k => set.add(k));
+          return set;
+        }, new Set())
+      );
+      sheets.push({ name: sheetName, rows: nrows.length });
+      columnsBySheet[sheetName] = columns;
+      if (preview.length < 10) preview.push(...nrows.slice(0, Math.max(0, 10 - preview.length)));
     }
 
-    // Read the uploaded file from the path where multer saved it
-    const workbook = xlsx.readFile(req.file.path);
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    const jsonData = xlsx.utils.sheet_to_json(worksheet);
-
-    // --- Optional: Save file metadata to your database ---
-    // const newFile = new File({
-    //   fileName: req.file.filename,
-    //   originalName: req.file.originalname,
-    //   filePath: req.file.path,
-    //   fileSize: req.file.size,
-    //   uploadedBy: req.user.id, // Associate the file with the logged-in user
-    // });
-    // await newFile.save();
-    // ----------------------------------------------------
-
-    // Send the extracted data back to the frontend
-    res.status(200).json({
-      message: 'File uploaded and processed successfully!',
-      data: jsonData
+    await Dataset.create({
+      datasetId,
+      userId,
+      originalFilename,
+      filePath,
+      sheets,
+      columnsBySheet,
+      preview,
     });
-  } catch (error) {
-    console.error('Error processing file:', error);
-    res.status(500).json({ message: 'An error occurred during file processing.' });
+
+    res.json({ datasetId, sheets, columns: columnsBySheet, preview, file: { filePath, originalFilename } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "upload/register failed" });
   }
 };
 
-module.exports = {
-  processExcelFile,
+// Build chart-ready data by reading from disk every time (cached workbook)
+export const buildChartData = async (req, res) => {
+  try {
+    const { datasetId, sheet, xKey, yKeys, agg = "sum", groupBy = true, filters } = req.body;
+    if (!datasetId || !sheet || !xKey || !yKeys?.length) {
+      return res.status(400).json({ error: "datasetId, sheet, xKey, yKeys required" });
+    }
+    const d = await Dataset.findOne({ datasetId }).lean();
+    if (!d) return res.status(404).json({ error: "dataset not found" });
+
+    const wb = loadWorkbook(d.filePath);
+    let rows = getNormalizedRows(wb, sheet).filter(r => passFilters(r, filters));
+    if (!rows.length) return res.json({ series: [], xType: "category" });
+
+    let series, xType;
+    const xSample = rows[0]?.[xKey];
+    xType = xSample instanceof Date ? "date" : (typeof xSample === "number" ? "number" : "category");
+
+    if (groupBy) {
+      const groups = groupByKey(rows, xKey).sort((a, b) => {
+        const A = a.raw, B = b.raw;
+        if (A instanceof Date && B instanceof Date) return A - B;
+        if (typeof A === "number" && typeof B === "number") return A - B;
+        return String(A).localeCompare(String(B));
+      });
+      series = yKeys.map(name => ({ name, data: [] }));
+      for (const g of groups) {
+        yKeys.forEach((yk, i) => {
+          const val = aggregate(g.rows.map(r => r[yk]), agg);
+          series[i].data.push({ x: g.raw, y: val });
+        });
+      }
+    } else {
+      const bySeries = new Map();
+      for (const r of rows) {
+        for (const yk of yKeys) {
+          if (!bySeries.has(yk)) bySeries.set(yk, []);
+          bySeries.get(yk).push({ x: r[xKey], y: r[yk] });
+        }
+      }
+      series = [...bySeries.entries()].map(([name, data]) => ({ name, data }));
+    }
+
+    return res.json({ series, xType });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "chart-data failed" });
+  }
+};
+
+// User history
+export const history = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.headers["x-user-id"] || "anonymous";
+    const items = await Dataset.find({ userId }).sort({ createdAt: -1 }).lean();
+    res.json(items.map(d => ({
+      datasetId: d.datasetId,
+      filename: d.originalFilename,
+      createdAt: d.createdAt,
+      sheets: d.sheets,
+    })));
+  } catch {
+    res.status(500).json({ error: "history failed" });
+  }
+};
+
+// Dataset meta for re-opening
+export const meta = async (req, res) => {
+  const d = await Dataset.findOne({ datasetId: req.params.id }).lean();
+  if (!d) return res.status(404).json({ error: "not found" });
+  res.json({
+    datasetId: d.datasetId,
+    sheets: d.sheets,
+    columns: d.columnsBySheet,
+    preview: d.preview,
+    filename: d.originalFilename,
+    createdAt: d.createdAt,
+  });
+};
+
+// Download original file
+export const downloadFile = async (req, res) => {
+  const d = await Dataset.findOne({ datasetId: req.params.id }).lean();
+  if (!d) return res.status(404).json({ error: "not found" });
+  res.download(d.filePath, d.originalFilename);
 };
