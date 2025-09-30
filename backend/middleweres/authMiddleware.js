@@ -1,21 +1,35 @@
 // middlewares/authMiddleware.js
-const jwt = require('jsonwebtoken');
-require('dotenv').config();
+const jwt = require("jsonwebtoken");
+const { JWT_SECRET } = require("../utils/jwt");
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-function authMiddleware(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) return res.status(401).json({ error: 'No token provided' });
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-
-    req.user = user; // {id,email,username}
+/**
+ * Verify Bearer token and attach req.user
+ */
+function verifyToken(req, res, next) {
+  try {
+    const auth = req.headers.authorization || "";
+    const parts = auth.split(" ");
+    if (parts.length !== 2 || parts[0] !== "Bearer") {
+      return res.status(401).json({ error: "Missing or invalid Authorization header" });
+    }
+    const token = parts[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // { id, email, username, role }
     next();
-  });
+  } catch (e) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
 }
 
-module.exports = authMiddleware;
+/**
+ * Require a specific role (e.g., "admin")
+ */
+function requireRole(role) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    if (req.user.role !== role) return res.status(403).json({ error: "Forbidden" });
+    next();
+  };
+}
+
+module.exports = { verifyToken, requireRole };
