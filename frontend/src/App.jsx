@@ -6,7 +6,7 @@ import Auth from './components/auth';
 import UploadPage from './components/converter';
 import ChatbotPage from './components/chatbot';
 import HistoryChatbot from './components/history_chatbot';
-import Landing from './components/landing';
+import Landing from './components/login';
 import MindMap from './components/mindmap';
 import Flashcard from './components/flashcard';
 import Summarize from './components/summarize';
@@ -18,10 +18,10 @@ function App() {
   return (
     <Router>
       <div>
-        <Navbar />
+        {/* <Navbar /> */}
         <Routes>
           <Route path="/" element={<Landing/>} />
-          <Route path="/summarize" element={<Summarize />} />
+          <Route path="/user" element={<Summarize />} />
           <Route path="/flashcard" element={<Flashcard />} />
           <Route path="/mindmap" element={<MindMap />} />
           <Route path="/qa" element={<QA/>} />

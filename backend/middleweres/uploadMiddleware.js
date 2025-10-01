@@ -11,11 +11,13 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const userId = req.user?.id || req.headers["x-user-id"] || "anonymous";
     const dest = path.join(__dirname, "..", "uploads", "users", userId);
+
     fs.mkdir(dest, { recursive: true }, (err) => cb(err, dest));
   },
   filename: (req, file, cb) => {
+    // Remove any unsafe characters from original name
     const safe = file.originalname.replace(/[^\w.\-]/g, "_");
-    cb(null, `${Date.now()}-${safe}`);
+    cb(null, safe); // ← No timestamp, just sanitized filename
   },
 });
 
