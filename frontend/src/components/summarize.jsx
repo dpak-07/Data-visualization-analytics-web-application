@@ -1,5 +1,6 @@
-// UserDashboardWithHistoryFullView.jsx
-// Requires: chart.js (v3+), react-chartjs-2, xlsx, framer-motion, tailwindcss
+// UserDashboardWithHistoryFullView_Merged.jsx
+// Merged and simplified version: local-only (no server integration).
+// Requires: react, react-chartjs-2 (v3+), chart.js, xlsx, framer-motion, tailwindcss
 // Render: <UserDashboardWithHistoryFullView currentUser={{ name, email }} />
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
@@ -35,79 +36,8 @@ ChartJS.register(
   TimeScale
 );
 
-const STORAGE_KEY = "exel_analysis_chart_history_v_chartjs_v3";
+const STORAGE_KEY = "exel_analysis_chart_history_local_v1";
 const CHART_COLORS = ["#7c3aed", "#06b6d4", "#ffd86b", "#f97316", "#60a5fa", "#34d399"];
-
-/* ---------------------------- API CONFIG ---------------------------- */
-// Adjust base path if your server mounts routes elsewhere
-const API_BASE = "/api/datasets";
-
-function getAuthHeaders() {
-  // Example: token in localStorage. Replace with your auth approach.
-  const token = localStorage.getItem("token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-async function uploadFileToServer(file) {
-  const fd = new FormData();
-  fd.append("file", file);
-  const res = await fetch(`${API_BASE}/upload`, {
-    method: "POST",
-    headers: { ...getAuthHeaders() },
-    body: fd,
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Upload failed: ${txt || res.statusText}`);
-  }
-  return res.json(); // expected { datasetId, sheets, columns, preview, file }
-}
-
-async function fetchSheetColumnsFromServer(datasetId, sheet) {
-  const q = new URLSearchParams({ datasetId, sheet }).toString();
-  const res = await fetch(`${API_BASE}/columns?${q}`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error("Failed to fetch sheet columns");
-  return res.json(); // { columns, rowsCount }
-}
-
-async function requestChartConfigFromServer(payload) {
-  const res = await fetch(`${API_BASE}/chart-config`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Chart config failed: ${txt || res.statusText}`);
-  }
-  return res.json(); // { config }
-}
-
-async function fetchHistoryFromServer() {
-  const res = await fetch(`${API_BASE}/history`, { headers: getAuthHeaders() });
-  if (!res.ok) throw new Error("Failed to fetch history");
-  return res.json();
-}
-
-async function exportChartServerSide(config, width = 1200, height = 800) {
-  const res = await fetch(`${API_BASE}/chart-export?width=${width}&height=${height}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-    body: JSON.stringify({ chartConfig: config }),
-  });
-  if (!res.ok) throw new Error("Server export failed");
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "chart.png";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-/* ------------------------- small helpers ---------------------------- */
 
 function looksLikeIsoDate(s) {
   if (typeof s !== "string") return false;
@@ -128,18 +58,13 @@ function canvasToPngDataUrl(srcCanvas, scale = 2) {
 }
 
 function pngDataUrlToSvgDataUrl(pngDataUrl, width = 1200, height = 800) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><image href="${pngDataUrl}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet"/></svg>`;
+  const svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\"><image href=\"${pngDataUrl}\" width=\"${width}\" height=\"${height}\" preserveAspectRatio=\"xMidYMid meet\"/></svg>`;
   return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
 }
 
-/* ------------------------- Component ---------------------------- */
-
-export default function UserDashboardWithHistoryFullView({
-  currentUser = { name: "Jane Doe", email: "jane@example.com" },
-}) {
-  // file + workbook
+export default function UserDashboardWithHistoryFullView({ currentUser = { name: "Jane Doe", email: "jane@example.com" } }) {
+  // file + workbook (local-only)
   const [fileName, setFileName] = useState(null);
-  const [datasetId, setDatasetId] = useState(null); // server dataset id (if uploaded)
   const [sheets, setSheets] = useState([]);
   const [sheetData, setSheetData] = useState({}); // { sheetName: { headers:[], rows:[] } }
   const [selectedSheet, setSelectedSheet] = useState("");
@@ -150,8 +75,7 @@ export default function UserDashboardWithHistoryFullView({
   const [chartType, setChartType] = useState("line"); // line, bar, area, pie, scatter
   const [chartData, setChartData] = useState(null);
   const [chartReady, setChartReady] = useState(false);
-  const [computedServerOptions, setComputedServerOptions] = useState(null);
-  const chartRef = useRef(null); // react-chartjs ref (chart instance)
+  const chartRef = useRef(null);
   const chartWrapperRef = useRef(null);
 
   // UI
@@ -176,7 +100,7 @@ export default function UserDashboardWithHistoryFullView({
   const [openSection, setOpenSection] = useState("file");
   const fileInputRef = useRef();
 
-  /* ------------------------- local file parsing (fallback) ------------------------- */
+  /* ------------------------- local file parsing ------------------------- */
   function parseWorkbookBuffer(buffer) {
     try {
       const wb = XLSX.read(buffer, { type: "array" });
@@ -206,10 +130,8 @@ export default function UserDashboardWithHistoryFullView({
     }
   }
 
-  /* ------------------------- helpers ------------------------- */
   function resetAll() {
     setFileName(null);
-    setDatasetId(null);
     setSheets([]);
     setSheetData({});
     setSelectedSheet("");
@@ -218,7 +140,6 @@ export default function UserDashboardWithHistoryFullView({
     setChartType("line");
     setChartData(null);
     setChartReady(false);
-    setComputedServerOptions(null);
     setError("");
     if (fileInputRef.current) fileInputRef.current.value = "";
     setOpenSection("file");
@@ -233,7 +154,6 @@ export default function UserDashboardWithHistoryFullView({
     setChartType("line");
     setChartData(null);
     setChartReady(false);
-    setComputedServerOptions(null);
     setError("");
     setOpenSection("columns");
   }
@@ -252,46 +172,11 @@ export default function UserDashboardWithHistoryFullView({
     return inst?.canvas || inst?.chart?.canvas || inst?.getCanvas?.();
   }
 
-  /* ------------------------- file handling: prefer server ------------------------- */
   async function handleFile(e) {
     resetForNewFile();
     const f = e.target.files?.[0];
     if (!f) return;
     setFileName(f.name);
-    // Try server upload first (recommended)
-    try {
-      setIsPreparing(true);
-      const uploadResp = await uploadFileToServer(f);
-      // server: { datasetId, sheets, columns, preview, file }
-      if (uploadResp?.datasetId) {
-        setDatasetId(uploadResp.datasetId);
-        // server might return sheets as array of {name, rows}, normalize
-        const serverSheetNames = (uploadResp.sheets || []).map((s) => (typeof s === "string" ? s : s.name || s.sheetName));
-        setSheets(serverSheetNames);
-        if (serverSheetNames.length) {
-          const first = serverSheetNames[0];
-          setSelectedSheet(first);
-          // fetch columns for first sheet
-          try {
-            const colsResp = await fetchSheetColumnsFromServer(uploadResp.datasetId, first);
-            setSheetData((p) => ({ ...p, [first]: { headers: colsResp.columns || [], rows: [] } }));
-            setRowRange({ from: 1, to: Math.max(1, colsResp.rowsCount || 1) });
-          } catch (err) {
-            console.warn("fetchSheetColumnsFromServer failed", err);
-          }
-        }
-        setOpenSection("columns");
-        setError("");
-        setIsPreparing(false);
-        return;
-      }
-    } catch (err) {
-      console.warn("server upload failed, falling back to local parse:", err);
-      // continue to local parse as fallback
-    } finally {
-      setIsPreparing(false);
-    }
-    // Local fallback parsing using XLSX
     try {
       const reader = new FileReader();
       reader.onload = (ev) => {
@@ -323,36 +208,23 @@ export default function UserDashboardWithHistoryFullView({
     }
   }
 
-  /* ------------------------- sheet/columns selection ------------------------- */
-  async function handleSelectSheet(s) {
+  function handleSelectSheet(s) {
     setSelectedSheet(s);
     setSelectedCols([]);
     setChartData(null);
     setChartReady(false);
-    setComputedServerOptions(null);
     setOpenSection("columns");
-    // try fetch columns from server if datasetId is present
-    if (datasetId) {
-      try {
-        const colsResp = await fetchSheetColumnsFromServer(datasetId, s);
-        setSheetData((p) => ({ ...p, [s]: { headers: colsResp.columns || [], rows: [] } }));
-        setRowRange({ from: 1, to: Math.max(1, colsResp.rowsCount || 1) });
-      } catch (err) {
-        console.warn("fetchSheetColumnsFromServer failed", err);
-      }
-    }
   }
 
   function toggleHeader(h) {
     setSelectedCols((prev) => (prev.includes(h) ? prev.filter((x) => x !== h) : [...prev, h]));
   }
 
-  /* ------------------------- prepare chart ------------------------- */
+  /* ------------------------- prepare chart (local-only) ------------------------- */
   async function prepareChart() {
     setError("");
     setIsPreparing(true);
     setChartReady(false);
-    setComputedServerOptions(null);
     await new Promise((r) => setTimeout(r, 120));
     const meta = sheetData[selectedSheet];
     if (!meta) {
@@ -366,36 +238,6 @@ export default function UserDashboardWithHistoryFullView({
       return;
     }
 
-    // If we have datasetId (server), request server chart-config for more robust config
-    if (datasetId) {
-      const xKey = selectedCols[0];
-      const yKeys = selectedCols.slice(1).length ? selectedCols.slice(1) : selectedCols;
-      const payload = {
-        datasetId,
-        sheet: selectedSheet,
-        xKey,
-        yKeys,
-        agg: "sum",
-        groupBy: true,
-        title: `${selectedSheet} — ${yKeys.join(",")}`,
-      };
-      try {
-        const resp = await requestChartConfigFromServer(payload);
-        // server returns { config } where config.data and config.options present
-        const cfg = resp?.config || {};
-        setChartData(cfg.data || {});
-        setComputedServerOptions(cfg.options || null);
-        setChartReady(true);
-        setOpenSection("preview");
-        setIsPreparing(false);
-        return;
-      } catch (err) {
-        console.warn("requestChartConfigFromServer failed, falling back to client build:", err);
-        // continue to client-side build
-      }
-    }
-
-    // Client-side fallback build (existing logic)
     try {
       const rows = meta.rows.slice(Math.max(0, rowRange.from - 1), Math.min(meta.rows.length, rowRange.to));
       if (!rows.length) {
@@ -412,8 +254,6 @@ export default function UserDashboardWithHistoryFullView({
           return;
         }
         const [labelCol, valueCol] = selectedCols;
-
-        // More robust parsing and color mapping
         const labels = [];
         const dataVals = [];
         for (const r of rows) {
@@ -464,7 +304,7 @@ export default function UserDashboardWithHistoryFullView({
           ],
         });
       }
-      // LINE / BAR / AREA  <-- **kept exactly as in your original** (no logic changes)
+      // LINE / BAR / AREA
       else {
         const xCol = selectedCols[0];
         const seriesCols = selectedCols.slice(1).length ? selectedCols.slice(1) : selectedCols;
@@ -562,7 +402,7 @@ export default function UserDashboardWithHistoryFullView({
     return opts;
   }, [chartData, chartType]);
 
-  /* ------------------------- exports & save ------------------------- */
+  /* ------------------------- exports & save (local-only) ------------------------- */
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
@@ -570,25 +410,13 @@ export default function UserDashboardWithHistoryFullView({
   }, [history]);
 
   async function exportPNG(scale = 2, filename = `chart_${Date.now()}.png`) {
-    // prefer client canvas export if chart already rendered
     const canvas = getCanvasFromChartRef();
     if (canvas) {
       const png = canvasToPngDataUrl(canvas, scale);
       downloadDataUrl(png, filename);
       return;
     }
-    // fallback: if we have computedServerOptions (server config), export server-side
-    try {
-      const cfg = computedServerOptions;
-      if (cfg) {
-        await exportChartServerSide(cfg, 1200, 800);
-        return;
-      }
-      setError("No canvas available to export. Generate a chart first.");
-    } catch (err) {
-      console.error(err);
-      setError("Export failed.");
-    }
+    setError("No canvas available to export. Generate a chart first.");
   }
 
   async function exportSVG(filename = `chart_${Date.now()}.svg`, scale = 2) {
@@ -621,7 +449,7 @@ export default function UserDashboardWithHistoryFullView({
          </head>
          <body>
            <img src="${png}" />
-           <script>setTimeout(()=>{window.print();}, 500)</script>
+           <script>setTimeout(()=>{window.print();}, 500)<\/script>
          </body>
        </html>`
     );
@@ -693,7 +521,6 @@ export default function UserDashboardWithHistoryFullView({
     } catch {}
   }
 
-  /* ------------------------- preview table ------------------------- */
   function renderPreviewTable() {
     const meta = sheetData[selectedSheet];
     if (!meta) return null;
@@ -726,7 +553,6 @@ export default function UserDashboardWithHistoryFullView({
     );
   }
 
-  /* ------------------------- chart renderer ------------------------- */
   useEffect(() => {
     if (chartReady && chartRef.current) {
       try {
@@ -738,34 +564,13 @@ export default function UserDashboardWithHistoryFullView({
 
   function renderChartJs() {
     if (!chartData || !chartReady) return null;
-    const opts = computedServerOptions || computedOptions;
+    const opts = computedOptions;
     if (chartType === "pie") return <Pie ref={chartRef} data={chartData} options={opts} />;
     if (chartType === "scatter") return <Scatter ref={chartRef} data={chartData} options={opts} />;
     if (chartType === "bar") return <Bar ref={chartRef} data={chartData} options={opts} />;
     return <Line ref={chartRef} data={chartData} options={opts} />;
   }
 
-  /* ------------------------- load server history when opening ------------------------- */
-  useEffect(() => {
-    if (!showHistoryView) return;
-    (async () => {
-      try {
-        const items = await fetchHistoryFromServer();
-        // map server items to client history minimal shape if desired
-        setHistory((prev) => {
-          // keep local items, but push server items to top (dedup by datasetId)
-          const existingIds = new Set(prev.map((p) => p.datasetId || p.id));
-          const serverItems = (items || []).map((it) => ({ ...it, id: it.datasetId }));
-          const merged = [...serverItems.filter((s) => !existingIds.has(s.id)), ...prev];
-          return merged.slice(0, 200);
-        });
-      } catch (err) {
-        console.warn("fetchHistoryFromServer failed", err);
-      }
-    })();
-  }, [showHistoryView]);
-
-  /* ------------------------- UI render ------------------------- */
   const fadeIn = { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 } };
 
   return (
@@ -785,8 +590,8 @@ export default function UserDashboardWithHistoryFullView({
         {/* Header */}
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-extrabold tracking-tight">Exel Analysis (Chart.js)</h1>
-            <p className="text-sm text-slate-300 mt-1">Upload Excel → pick sheet/columns → generate → export/save.</p>
+            <h1 className="text-3xl font-extrabold tracking-tight">Exel Analysis (Chart.js) — Local</h1>
+            <p className="text-sm text-slate-300 mt-1">Upload Excel → pick sheet/columns → generate → export/save (local only).</p>
           </div>
           <div className="flex items-center gap-3">
             <div className="hidden md:flex items-center gap-3 bg-white/6 px-3 py-2 rounded-lg border border-white/8">
@@ -803,7 +608,9 @@ export default function UserDashboardWithHistoryFullView({
         </header>
 
         {/* Main: accordion steps */}
-        <main className="space-y-6">
+        <main className="space-y-6"> 
+          {/* ... (UI sections unchanged) ... */}
+
           {/* 1 — File */}
           <section className="bg-white/3 border border-white/6 rounded-2xl p-4">
             <div className="flex items-center justify-between cursor-pointer" onClick={() => setOpenSection("file")}>
@@ -833,7 +640,7 @@ export default function UserDashboardWithHistoryFullView({
                     </select>
                   </div>
 
-                  <div className="mt-2 text-xs text-slate-300">{selectedSheet ? `Rows: ${sheetData[selectedSheet]?.rows?.length ?? sheetData[selectedSheet]?.rows?.length ?? 0}` : "Select a sheet to preview."}</div>
+                  <div className="mt-2 text-xs text-slate-300">{selectedSheet ? `Rows: ${sheetData[selectedSheet]?.rows?.length ?? 0}` : "Select a sheet to preview."}</div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -841,7 +648,7 @@ export default function UserDashboardWithHistoryFullView({
 
           {/* 2 — Columns & Range */}
           <section className="bg-white/3 border border-white/6 rounded-2xl p-4">
-            <div className="flex items-center justify-between cursor-pointer" onClick={() => setOpenSection("columns")}>
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setOpenSection("columns")}> 
               <div>
                 <div className="text-lg font-semibold">2 — Columns & Range</div>
                 <div className="text-xs text-slate-300">Pick which columns and row-range to visualize</div>
@@ -1005,16 +812,9 @@ export default function UserDashboardWithHistoryFullView({
                               setChartType(payload.chartType || "line");
                               setSelectedCols(payload.selectedCols || []);
                               setChartData(payload.chartData || payload.chartPayload?.chartData || null);
-                              setComputedServerOptions(null);
                               setChartReady(true);
                               setShowHistoryView(false);
                               setOpenSection("preview");
-                            } else if (it.datasetId) {
-                              // basic restore to dataset
-                              setDatasetId(it.datasetId);
-                              setSelectedSheet(it.sheets?.[0]?.name || "");
-                              setShowHistoryView(false);
-                              setOpenSection("columns");
                             }
                           }} className="text-xs bg-white/6 px-2 py-1 rounded">Restore</button>
                         </div>
