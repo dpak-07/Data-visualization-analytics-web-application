@@ -96,7 +96,7 @@ export default function ExelAuthUniqueV2() {
         setSuccess("Sign-up successful — redirecting to user area...");
         setLoading(false);
         // redirect immediately to /user
-        navigate("/user", { replace: true });
+        navigate("/userdashboard", { replace: true });
         return;
       }
 

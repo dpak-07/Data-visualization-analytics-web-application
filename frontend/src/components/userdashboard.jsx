@@ -46,8 +46,9 @@
      *
      * If your backend uses "/genrated chars" (typo), replace GENERATED_CHARTS_ENDPOINT accordingly.
      */
-    const EXCEL_UPLOAD_ENDPOINT = "/exeluploads";
-    const GENERATED_CHARTS_ENDPOINT = "/generated_charts";
+    // top of file (replace existing constants)
+const EXCEL_UPLOAD_ENDPOINT = "/api/uploads";
+const GENERATED_CHARTS_ENDPOINT = "/api/uploads";
 
     function looksLikeIsoDate(s) {
     if (typeof s !== "string") return false;
