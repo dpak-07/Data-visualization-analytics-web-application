@@ -1,18 +1,11 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 import './App.css';
-import Navbar from './components/navbar';
-import Auth from './components/auth';
-import UploadPage from './components/converter';
-import ChatbotPage from './components/chatbot';
-import HistoryChatbot from './components/history_chatbot';
+
 import Landing from './components/login';
-import MindMap from './components/mindmap';
-import Flashcard from './components/flashcard';
-import Summarize from './components/summarize';
-import QA from './components/qa';
-
-
+import MindMap from './components/history';
+import Flashcard from './components/adminportal';
+import Summarize from './components/userdashboard';
 function App() {
   
   return (
@@ -21,13 +14,9 @@ function App() {
         {/* <Navbar /> */}
         <Routes>
           <Route path="/" element={<Landing/>} />
-          <Route path="/user" element={<Summarize />} />
-          <Route path="/flashcard" element={<Flashcard />} />
-          <Route path="/mindmap" element={<MindMap />} />
-          <Route path="/qa" element={<QA/>} />
-          <Route path="/chatbot" element={<ChatbotPage />} />
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/historychatbot" element={<HistoryChatbot />} />
+          <Route path="/userdashboard" element={<Summarize />} />
+          <Route path="/admin" element={<Flashcard />} />
+          <Route path="/history" element={<MindMap />} />
         </Routes>
       </div>
     </Router>

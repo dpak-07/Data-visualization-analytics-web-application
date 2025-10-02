@@ -1,21 +1,34 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 
 /**
- * ExelAuthUniqueV2
- * - Single-file React component
- * - Requires: Tailwind CSS + framer-motion
+ * ExelAuthUniqueV2 (Integrated)
+ * - Calls backend auth endpoints
+ * - Stores returned token in localStorage
+ * - Redirects user to /user and admin to /admin
+ *
+ * Requirements:
+ * - Tailwind CSS
+ * - framer-motion
+ * - react-router-dom (for useNavigate)
+ *
+ * Notes:
+ * - Admin Code required client-side to be "69" (default)
+ * - Adjust API base paths if needed (currently uses relative /api/*)
  */
+
 export default function ExelAuthUniqueV2() {
   const [mode, setMode] = useState("user"); // 'user' | 'admin'
   const [view, setView] = useState("login"); // 'login' | 'signup'
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", password: "", adminCode: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", adminCode: "69" }); // adminCode prefilled to 69
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [focused, setFocused] = useState("");
 
   const adminCodeRef = useRef(null);
+  const navigate = useNavigate();
 
   function resetMessages() {
     setError("");
@@ -30,11 +43,12 @@ export default function ExelAuthUniqueV2() {
     resetMessages();
     setMode("admin");
     setView("login");
-    setForm((f) => ({ ...f, name: "", password: "" }));
+    setForm((f) => ({ ...f, name: "", password: "", adminCode: "69" })); // default admin code 69
   }
   function switchToUser() {
     resetMessages();
     setMode("user");
+    setForm((f) => ({ ...f, adminCode: "" }));
   }
 
   // autofocus admin input when switched
@@ -49,42 +63,111 @@ export default function ExelAuthUniqueV2() {
     resetMessages();
     setLoading(true);
 
-    // demo delay — replace with API call
-    await new Promise((r) => setTimeout(r, 650));
+    try {
+      // Basic client-side validation
+      if (view === "signup") {
+        if (!form.name || !form.email || form.password.length < 6) {
+          setError("Please provide name, valid email and a 6+ char password.");
+          setLoading(false);
+          return;
+        }
 
-    if (view === "signup") {
-      if (!form.name || !form.email || form.password.length < 6) {
-        setError("Please provide name, valid email and a 6+ char password.");
+        // Call user signup API
+        const res = await fetch("/api/auth/user/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: form.name, email: form.email, password: form.password }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Signup failed");
+          setLoading(false);
+          return;
+        }
+
+        // store token and navigate to /user (you may want them to login first; here we store token immediately)
+        if (data.token) {
+          localStorage.setItem("token", data.token);
+          localStorage.setItem("userEmail", form.email);
+          localStorage.setItem("role", "user");
+        }
+
+        setSuccess("Sign-up successful — redirecting to user area...");
+        setLoading(false);
+        // redirect immediately to /user
+        navigate("/user", { replace: true });
+        return;
+      }
+
+      // LOGIN flow
+      if (!form.email || !form.password) {
+        setError("Enter email and password.");
         setLoading(false);
         return;
       }
-      setSuccess("Sign-up successful — please sign in.");
-      setView("login");
-      setForm({ ...form, password: "" });
-      setLoading(false);
-      return;
-    }
 
-    if (!form.email || !form.password) {
-      setError("Enter email and password.");
-      setLoading(false);
-      return;
-    }
+      if (mode === "admin") {
+        // client-side admin code gate (as requested): must be "69"
+        if (String(form.adminCode).trim() !== "69") {
+          setError("Invalid admin code.");
+          setLoading(false);
+          return;
+        }
 
-    if (mode === "admin") {
-      // NOTE: secure server-side check required in production
-      if (form.adminCode !== "ADMIN_SECRET") {
-        setError("Invalid admin code.");
+        // Call admin login endpoint
+        const res = await fetch("/api/auth/admin/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email, password: form.password }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Admin login failed");
+          setLoading(false);
+          return;
+        }
+
+        if (data.token) {
+          localStorage.setItem("token", data.token);
+          localStorage.setItem("userEmail", form.email);
+          localStorage.setItem("role", "admin");
+        }
+
+        setSuccess("Welcome, Admin — redirecting...");
+        setLoading(false);
+        navigate("/admin", { replace: true });
+        return;
+      }
+
+      // normal user login
+      const res = await fetch("/api/auth/user/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.email, password: form.password }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Login failed");
         setLoading(false);
         return;
       }
-      setSuccess("Welcome, Admin — redirecting...");
-      setLoading(false);
-      return;
-    }
 
-    setSuccess(`Welcome back — ${form.email}`);
-    setLoading(false);
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem("userEmail", form.email);
+        localStorage.setItem("role", "user");
+      }
+
+      setSuccess(`Welcome back — ${form.email}`);
+      setLoading(false);
+      navigate("/user", { replace: true });
+    } catch (err) {
+      console.error("Auth error:", err);
+      setError("Server error — please try again later.");
+      setLoading(false);
+    }
   }
 
   // Animations / variants
@@ -207,7 +290,7 @@ export default function ExelAuthUniqueV2() {
                 <AnimatePresence>
                   {mode === "admin" && (
                     <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="mb-2 p-2 rounded-md bg-[#fffbe8] text-[#463500] text-sm font-medium border border-[#f5e6bf]">
-                      Admin-only login — provide Admin Code.
+                      Admin-only login — provide Admin Code (default <strong>69</strong>).
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -253,7 +336,7 @@ export default function ExelAuthUniqueV2() {
                 {/* form */}
                 <AnimatePresence mode="wait">
                   <motion.form
-                    key={view}
+                    key={view + mode}
                     layout
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -327,7 +410,7 @@ export default function ExelAuthUniqueV2() {
                             onChange={handleChange}
                             onFocus={() => setFocused("adminCode")}
                             onBlur={() => setFocused("")}
-                            placeholder="Enter Admin Code"
+                            placeholder="Enter Admin Code (default 69)"
                             autoComplete="one-time-code"
                             className="w-full rounded-md bg-transparent px-3 py-3 border border-white/6 focus:outline-none"
                           />

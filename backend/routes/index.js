@@ -3,8 +3,9 @@ const express = require("express");
 const router = express.Router();
 
 // Upload & dataset routes
-const uploadRoutes = require("./upload_routes");
-router.use("/datasets", uploadRoutes);
+// I expect a modular router at ./uploads/index.js (exporting router)
+const uploadRoutes = require("./charts"); // <- adjust if your file name differs
+router.use("/uploads", uploadRoutes);
 
 // Auth routes
 const adminAuthRoutes = require("./admin_auth_routes");
@@ -14,7 +15,7 @@ router.use("/auth/admin", adminAuthRoutes);
 router.use("/auth/user", userAuthRoutes);
 
 // History & admin routes
-const historyAdminRoutes = require("./historyroutes");
+const historyAdminRoutes = require("./history");
 router.use("/history", historyAdminRoutes);
 
 module.exports = router;
