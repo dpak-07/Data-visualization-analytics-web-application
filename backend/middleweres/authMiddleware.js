@@ -1,35 +1,28 @@
-// middlewares/authMiddleware.js
-const jwt = require("jsonwebtoken");
-const { JWT_SECRET } = require("../utils/jwt");
+// middleweres/authMiddleware.js
+// Lightweight dev auth middleware. Replace with real JWT/session logic in production.
 
-/**
- * Verify Bearer token and attach req.user
- */
-function verifyToken(req, res, next) {
-  try {
-    const auth = req.headers.authorization || "";
-    const parts = auth.split(" ");
-    if (parts.length !== 2 || parts[0] !== "Bearer") {
-      return res.status(401).json({ error: "Missing or invalid Authorization header" });
+module.exports = {
+  verifyToken: (req, res, next) => {
+    // For development convenience accept x-user-id header
+    const headerId = req.headers["x-user-id"] || req.headers["x-userid"];
+    const role = req.headers["x-user-role"] || req.headers["x-role"] || "user";
+
+    if (headerId) {
+      req.user = { id: String(headerId), role };
+      req.userId = String(headerId);
+    } else {
+      // no user header — leave as anonymous user (null)
+      req.user = null;
+      req.userId = null;
     }
-    const token = parts[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // { id, email, username, role }
     next();
-  } catch (e) {
-    return res.status(401).json({ error: "Invalid or expired token" });
+  },
+
+  requireRole: (role) => {
+    return (req, res, next) => {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      if (req.user.role !== role) return res.status(403).json({ error: "Forbidden - require role " + role });
+      next();
+    };
   }
-}
-
-/**
- * Require a specific role (e.g., "admin")
- */
-function requireRole(role) {
-  return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-    if (req.user.role !== role) return res.status(403).json({ error: "Forbidden" });
-    next();
-  };
-}
-
-module.exports = { verifyToken, requireRole };
+};

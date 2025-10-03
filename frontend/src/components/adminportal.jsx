@@ -1,6 +1,6 @@
-// AdminConsole.jsx
+// src/components/AdminConsole.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -31,111 +31,100 @@ ChartJS.register(
 
 /**
  * AdminConsole.jsx
- * - Integrates frontend Admin dashboard with provided backend controllers.
- * - Features:
- *   • List datasets (admin/user)
- *   • Upload Excel files (POST /api/exel)
- *   • View dataset meta (/api/datasets/:id/meta)
- *   • Build chart config server-side (/api/upload/buildChartConfig)
- *   • Render returned Chart.js config client-side
- *   • Export server-side PNG (/api/upload/exportChartPng)
- *   • Record chart (/api/charts)
- *   • Admin dataset/chart operations (delete, reassign, download)
  *
- * Requirements: react, react-chartjs-2, chart.js, framer-motion, tailwindcss
+ * Props:
+ *  - apiBaseUrl (optional) : string (e.g. "http://localhost:3000")
+ *
+ * If no prop provided it will read from process.env.REACT_APP_API_BASE or default to "".
  */
 
-// ---------- config ----------
-const API_BASE = ""; // set if your API is at a different base URL (e.g. "https://api.example.com")
-const ENDPOINTS = {
-  upload: () => `${API_BASE}/api/exel`, // POST multipart (file)
-  meta: (id) => `${API_BASE}/api/datasets/${id}/meta`, // GET
-  buildChartConfig: () => `${API_BASE}/api/upload/buildChartConfig`, // POST {datasetId, sheet, xKey, yKeys...}
-  exportChartPng: () => `${API_BASE}/api/upload/exportChartPng`, // POST { chartConfig } -> image/png
-  recordChart: () => `${API_BASE}/api/charts`, // POST { datasetId, title, chartPayload, thumbnailDataUrl? }
-  listHistory: () => `${API_BASE}/api/user/history`, // GET user history (try) / fallback to /api/history
-  adminDatasets: () => `${API_BASE}/api/admin/datasets`, // GET admin datasets
-  adminGetDataset: (id) => `${API_BASE}/api/admin/datasets/${id}`, // GET admin dataset
-  adminDeleteDataset: (id) => `${API_BASE}/api/admin/datasets/${id}`, // DELETE
-  adminReassignDataset: (id) => `${API_BASE}/api/admin/datasets/${id}/reassign`, // POST { newUserId }
-  adminDownloadDataset: (id) => `${API_BASE}/api/admin/datasets/${id}/download`, // GET
-  adminListCharts: () => `${API_BASE}/api/admin/charts`,
-  adminDeleteChart: (id) => `${API_BASE}/api/admin/charts/${id}`,
-};
+export default function AdminConsole({ apiBaseUrl = "" }) {
+  const API_BASE = apiBaseUrl || (typeof process !== "undefined" && process.env.REACT_APP_API_BASE) || "";
+  const ENDPOINTS = {
+    upload: () => `${API_BASE}/api/exel`,
+    meta: (id) => `${API_BASE}/api/datasets/${id}/meta`,
+    buildChartConfig: () => `${API_BASE}/api/upload/buildChartConfig`,
+    exportChartPng: () => `${API_BASE}/api/upload/exportChartPng`,
+    recordChart: () => `${API_BASE}/api/charts`,
+    listHistory: () => `${API_BASE}/api/user/history`,
+    adminDatasets: () => `${API_BASE}/api/admin/datasets`,
+    adminGetDataset: (id) => `${API_BASE}/api/admin/datasets/${id}`,
+    adminDeleteDataset: (id) => `${API_BASE}/api/admin/datasets/${id}`,
+    adminReassignDataset: (id) => `${API_BASE}/api/admin/datasets/${id}/reassign`,
+    adminDownloadDataset: (id) => `${API_BASE}/api/admin/datasets/${id}/download`,
+    adminListCharts: () => `${API_BASE}/api/admin/charts`,
+    adminDeleteChart: (id) => `${API_BASE}/api/admin/charts/${id}`,
+    getSheetColumns: () => `${API_BASE}/api/upload/getSheetColumns`, // ?datasetId=&sheet=
+    getRows: () => `${API_BASE}/api/upload/getRows`, // ?datasetId=&sheet=&page=&pageSize=
+  };
 
-// ---------- small helpers ----------
-const gradientBtn = "bg-gradient-to-r from-[#2dd4bf] via-[#facc15] to-[#10b981] text-black font-semibold rounded-lg px-4 py-2 shadow-md";
-const ghostBtn = "bg-transparent border border-white/20 text-white px-3 py-1 rounded-md";
+  const gradientBtn = "bg-gradient-to-r from-[#2dd4bf] via-[#facc15] to-[#10b981] text-black font-semibold rounded-lg px-4 py-2 shadow-md";
+  const ghostBtn = "bg-transparent border border-white/20 text-white px-3 py-1 rounded-md";
 
-function rgba(hex, alpha = 0.15) {
-  const bigint = parseInt(hex.replace("#", ""), 16);
-  const r = (bigint >> 16) & 255;
-  const g = (bigint >> 8) & 255;
-  const b = bigint & 255;
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-async function apiFetchJson(url, opts = {}) {
-  const res = await fetch(url, { credentials: "same-origin", ...opts });
-  const txt = await res.text();
-  const ct = res.headers.get("content-type") || "";
-  if (!res.ok) {
-    let payload = txt;
-    try { payload = JSON.parse(txt); } catch {}
-    throw { status: res.status, payload };
+  function rgba(hex, alpha = 0.15) {
+    const bigint = parseInt(hex.replace("#", ""), 16);
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
   }
-  if (ct.includes("application/json")) return JSON.parse(txt);
-  return txt;
-}
 
-// ---------- small fake users generator (keeps your existing UI behaviour) ----------
-function randomUsers() {
-  const COLORS = ["#ef4444","#10b981","#3b82f6","#f59e0b","#8b5cf6","#ec4899","#06b6d4","#f97316"];
-  const arr = [];
-  for (let i=1;i<=8;i++){
-    arr.push({
-      id: i,
-      name: ["Kavshik","Santosh","Kishan","Vikash","Vishal","Dinesh","User","Guest"][i-1] || `User${i}`,
-      email: `user${i}@example.com`,
-      joined: new Date(Date.now()-i*86400000).toISOString().slice(0,10),
-      chartsGenerated: Math.floor(Math.random()*20),
-      chartsDownloaded: Math.floor(Math.random()*10),
-      history: [],
-    });
+  async function apiFetchJson(url, opts = {}) {
+    const res = await fetch(url, { credentials: "same-origin", ...opts });
+    const txt = await res.text();
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok) {
+      let payload = txt;
+      try { payload = JSON.parse(txt); } catch {}
+      throw { status: res.status, payload };
+    }
+    if (ct.includes("application/json")) return JSON.parse(txt);
+    return txt;
   }
-  return arr;
-}
 
-// ---------- base chart options ----------
-const baseChartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: { labels: { color: "#ffffff" } },
-    tooltip: {
-      titleColor: "#ffffff",
-      bodyColor: "#ffffff",
-      backgroundColor: "rgba(0,0,0,0.75)",
+  function randomUsers() {
+    const arr = [];
+    for (let i = 1; i <= 8; i++) {
+      arr.push({
+        id: i,
+        name: ["Kavshik","Santosh","Kishan","Vikash","Vishal","Dinesh","User","Guest"][i-1] || `User${i}`,
+        email: `user${i}@example.com`,
+        joined: new Date(Date.now()-i*86400000).toISOString().slice(0,10),
+        chartsGenerated: Math.floor(Math.random()*20),
+        chartsDownloaded: Math.floor(Math.random()*10),
+        history: [],
+      });
+    }
+    return arr;
+  }
+
+  const baseChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: "#ffffff" } },
+      tooltip: {
+        titleColor: "#ffffff",
+        bodyColor: "#ffffff",
+        backgroundColor: "rgba(0,0,0,0.75)",
+      },
     },
-  },
-  scales: {
-    x: { ticks: { color: "#ffffff" }, grid: { color: "rgba(255,255,255,0.06)" }, title: { color: "#ffffff", display: false } },
-    y: { ticks: { color: "#ffffff" }, grid: { color: "rgba(255,255,255,0.06)" }, title: { color: "#ffffff", display: false } },
-  },
-};
+    scales: {
+      x: { ticks: { color: "#ffffff" }, grid: { color: "rgba(255,255,255,0.06)" }, title: { color: "#ffffff", display: false } },
+      y: { ticks: { color: "#ffffff" }, grid: { color: "rgba(255,255,255,0.06)" }, title: { color: "#ffffff", display: false } },
+    },
+  };
 
-// ========== Component ==========
-export default function AdminConsole() {
   // UI state
   const [users, setUsers] = useState(randomUsers());
-  const [datasets, setDatasets] = useState([]); // datasets from server (admin/user)
+  const [datasets, setDatasets] = useState([]);
   const [query, setQuery] = useState("");
   const [selectedDataset, setSelectedDataset] = useState(null);
   const [sheetCols, setSheetCols] = useState([]);
   const [sheetPreviewRows, setSheetPreviewRows] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState("");
   const [xKey, setXKey] = useState("");
-  const [yKey, setYKey] = useState(""); // single ykey for simplicity (can extend to multi)
+  const [yKey, setYKey] = useState("");
   const [agg, setAgg] = useState("sum");
   const [serverChartConfig, setServerChartConfig] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -143,34 +132,29 @@ export default function AdminConsole() {
   const [fileInputKey, setFileInputKey] = useState(Date.now());
   const [adminMode, setAdminMode] = useState(false);
   const chartRef = useRef(null);
-  const hiddenCanvasRef = useRef(null);
 
-  // totals (for dashboard widgets)
   const totals = useMemo(() => ({
     totalUsers: users.length,
     totalChartsGenerated: users.reduce((s,u)=>s+u.chartsGenerated,0),
     totalChartsDownloaded: users.reduce((s,u)=>s+u.chartsDownloaded,0),
   }), [users]);
 
-  // load datasets on mount (try user history first otherwise admin listing)
+  // load datasets on mount
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
         try {
           const h = await apiFetchJson(ENDPOINTS.listHistory());
-          // history endpoint formats vary; handle known shapes
           if (h?.items) {
             setDatasets(h.items.map(it => ({ datasetId: it.datasetId, originalFilename: it.filename, sheets: it.sheets, preview: it.rowsPreview })));
           } else if (Array.isArray(h)) {
             setDatasets(h);
           } else {
-            // fallback: try admin list (may require admin token)
             const admin = await apiFetchJson(ENDPOINTS.adminDatasets() + "?page=1&pageSize=50");
             if (admin?.datasets) setDatasets(admin.datasets);
           }
         } catch (e) {
-          // fallback to admin list
           try {
             const admin = await apiFetchJson(ENDPOINTS.adminDatasets() + "?page=1&pageSize=50");
             if (admin?.datasets) setDatasets(admin.datasets);
@@ -186,7 +170,6 @@ export default function AdminConsole() {
     })();
   }, []);
 
-  // filtered datasets for side list
   const filteredDatasets = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return datasets;
@@ -208,7 +191,6 @@ export default function AdminConsole() {
         throw new Error(txt || `Upload failed ${res.status}`);
       }
       const body = await res.json();
-      // response shape (your backend) -> { datasetId, sheets, columns: columnsBySheet, preview, file }
       const meta = {
         datasetId: body.datasetId,
         originalFilename: body.file?.originalFilename || `upload-${Date.now()}`,
@@ -227,21 +209,14 @@ export default function AdminConsole() {
   }
 
   async function openDataset(dataset) {
-    setSelectedDataset(null); // reset
+    setSelectedDataset(null);
     setSheetCols([]);
     setSheetPreviewRows([]);
     setSelectedDataset(dataset);
-    // fetch meta from server for fresh info
     try {
       const meta = await apiFetchJson(ENDPOINTS.meta(dataset.datasetId));
       setSelectedDataset({ ...meta, datasetId: meta.datasetId || dataset.datasetId });
-      if (meta.sheets?.[0]) {
-        setSelectedSheet(meta.sheets[0].name);
-        // request columns for that sheet (if route exists)
-        try {
-          const q = new URL(ENDPOINTS.buildChartConfig(), window.location.origin); // use endpoint base for query building
-        } catch {}
-      }
+      if (meta.sheets?.[0]) setSelectedSheet(meta.sheets[0].name);
     } catch (err) {
       console.warn("could not fetch dataset meta, using cached meta", err);
     }
@@ -251,21 +226,17 @@ export default function AdminConsole() {
     if (!datasetId || !sheet) return;
     setLoading(true);
     try {
-      // your server has getSheetColumns controller at GET /api/upload/getSheetColumns?datasetId=...&sheet=...
-      const url = `${API_BASE}/api/upload/getSheetColumns?datasetId=${encodeURIComponent(datasetId)}&sheet=${encodeURIComponent(sheet)}`;
+      const url = `${ENDPOINTS.getSheetColumns()}?datasetId=${encodeURIComponent(datasetId)}&sheet=${encodeURIComponent(sheet)}`;
       const body = await apiFetchJson(url, { method: "GET" });
-      if (body?.columns) {
-        setSheetCols(body.columns);
-      } else if (body?.columnsBySheet && body.columnsBySheet[sheet]) {
-        setSheetCols(body.columnsBySheet[sheet]);
-      } else {
-        // fallback: use selectedDataset.preview rows to infer columns
+      if (body?.columns) setSheetCols(body.columns);
+      else if (body?.columnsBySheet && body.columnsBySheet[sheet]) setSheetCols(body.columnsBySheet[sheet]);
+      else {
         const rows = selectedDataset?.preview || [];
         const cols = rows.length ? Object.keys(rows[0]) : [];
         setSheetCols(cols);
       }
-      // fetch first page preview rows
-      const rowsUrl = `${API_BASE}/api/upload/getRows?datasetId=${encodeURIComponent(datasetId)}&sheet=${encodeURIComponent(sheet)}&page=1&pageSize=20`;
+
+      const rowsUrl = `${ENDPOINTS.getRows()}?datasetId=${encodeURIComponent(datasetId)}&sheet=${encodeURIComponent(sheet)}&page=1&pageSize=20`;
       try {
         const rowsBody = await fetch(rowsUrl, { method: "GET", credentials: "same-origin" });
         if (rowsBody.ok) {
@@ -318,14 +289,10 @@ export default function AdminConsole() {
         throw new Error(txt || `buildChartConfig failed ${res.status}`);
       }
       const body = await res.json();
-      // server returns { config }
       if (body?.config) {
         setServerChartConfig(body.config);
-        // scroll to chart (optional)
         setTimeout(() => { window.scrollTo({ top: 0, behavior: "smooth" }); }, 150);
-      } else {
-        throw new Error("no config returned");
-      }
+      } else throw new Error("no config returned");
     } catch (err) {
       console.error("buildServerChart failed", err);
       alert("buildServerChart failed: " + (err.message || JSON.stringify(err)));
@@ -365,7 +332,6 @@ export default function AdminConsole() {
   async function recordChartOnServer() {
     if (!serverChartConfig || !selectedDataset?.datasetId) return alert("build chart and select dataset first");
     try {
-      // create a thumbnail dataURL from canvas if chartRef available
       let thumbnailDataUrl = null;
       try {
         const canvas = document.querySelector("#rendered-chart canvas");
@@ -397,7 +363,6 @@ export default function AdminConsole() {
     }
   }
 
-  // admin actions: delete dataset
   async function adminDeleteDataset(datasetId, unlink = false) {
     if (!window.confirm("Delete dataset? This will remove DB record and optionally delete file from disk.")) return;
     try {
@@ -447,7 +412,6 @@ export default function AdminConsole() {
     }
   }
 
-  // ---------- small UI helpers ----------
   const COLORS = ["#ef4444","#10b981","#3b82f6","#f59e0b","#8b5cf6","#ec4899","#06b6d4","#f97316"];
 
   // ---------- render ----------
@@ -469,13 +433,12 @@ export default function AdminConsole() {
         </header>
 
         <main className="grid grid-cols-12 gap-6">
-          {/* Left: Overview + Chart builder */}
           <section className="col-span-8 bg-white/4 rounded-2xl p-6 shadow-inner">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Overview</h2>
               <div className="flex items-center gap-3">
                 <label className="text-xs text-white/70 mr-2">Upload excel</label>
-                <input key={fileInputKey} type="file" accept=".xlsx,.xls" onChange={handleUploadFile} className="text-sm text-white bg-white/5 rounded p-1" />
+                <input key={fileInputKey} type="file" accept=".xlsx,.xls,.csv" onChange={handleUploadFile} className="text-sm text-white bg-white/5 rounded p-1" />
               </div>
             </div>
 
